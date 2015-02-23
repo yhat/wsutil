@@ -26,7 +26,8 @@ type ReverseProxy struct {
 	ErrorLog *log.Logger
 }
 
-// stolen from net/http/httputil
+// stolen from net/http/httputil. singleJoiningSlash ensures that the route
+// '/a/' joined with '/b' becomes '/a/b'.
 func singleJoiningSlash(a, b string) string {
 	aslash := strings.HasSuffix(a, "/")
 	bslash := strings.HasPrefix(b, "/")
@@ -65,9 +66,11 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logFunc = p.ErrorLog.Printf
 	}
 	outreq := new(http.Request)
+	// shallow copying
 	*outreq = *r
 	p.Director(outreq)
 	host := outreq.URL.Host
+	// if host does not specify a port, default to port 80
 	if !strings.Contains(host, ":") {
 		host = host + ":80"
 	}
