@@ -19,6 +19,11 @@ type ReverseProxy struct {
 	// back to the original client unmodified.
 	Director func(*http.Request)
 
+	// Dial specifies the dial function for dialing the proxied
+	// server over tcp.
+	// If Dial is nil, net.Dial is used.
+	Dial func(network, addr string) (net.Conn, error)
+
 	// ErrorLog specifies an optional logger for errors
 	// that occur when attempting to proxy the request.
 	// If nil, logging goes to os.Stderr via the log package's
@@ -74,7 +79,11 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !strings.Contains(host, ":") {
 		host = host + ":80"
 	}
-	d, err := net.Dial("tcp", host)
+	dial := p.Dial
+	if dial == nil {
+		dial = net.Dial
+	}
+	d, err := dial("tcp", host)
 	if err != nil {
 		http.Error(w, "Error forwarding request.", 500)
 		logFunc("Error dialing websocket backend %s: %v", outreq.URL, err)
