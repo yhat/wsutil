@@ -2,6 +2,8 @@
 
 Like `net/http/httputil` but for WebSockets.
 
+[![GoDoc](https://godoc.org/github.com/yhat/wsutil?status.svg)](https://godoc.org/github.com/yhat/wsutil)
+
 ## A Reverse Proxy Example
 
 ```go
