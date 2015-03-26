@@ -70,6 +70,13 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if p.ErrorLog != nil {
 		logFunc = p.ErrorLog.Printf
 	}
+
+	if !IsWebSocketRequest(r) {
+		http.Error(w, "Cannot handle non-WebSocket requests", 500)
+		logFunc("Received a request that was not a WebSocket request")
+		return
+	}
+
 	outreq := new(http.Request)
 	// shallow copying
 	*outreq = *r
@@ -105,7 +112,8 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer nc.Close() // must close the underlying net connection after hijacking
 	defer d.Close()
 
-	err = outreq.Write(d) // write the modified incoming request to the dialed connection
+	// write the modified incoming request to the dialed connection
+	err = outreq.Write(d)
 	if err != nil {
 		logFunc("Error copying request to target: %v", err)
 		return
