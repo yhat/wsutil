@@ -1,6 +1,7 @@
 package wsutil
 
 import (
+	"crypto/tls"
 	"io"
 	"log"
 	"net"
@@ -23,6 +24,10 @@ type ReverseProxy struct {
 	// server over tcp.
 	// If Dial is nil, net.Dial is used.
 	Dial func(network, addr string) (net.Conn, error)
+
+	// TLSClientConfig specifies the TLS configuration to use for 'wss'.
+	// If nil, the default configuration is used.
+	TLSClientConfig *tls.Config
 
 	// ErrorLog specifies an optional logger for errors
 	// that occur when attempting to proxy the request.
@@ -49,6 +54,7 @@ func singleJoiningSlash(a, b string) string {
 // rewrites follow the same rules as the httputil.ReverseProxy. If the target
 // url has the path '/foo' and the incoming request '/bar', the request path
 // will be updated to '/foo/bar' before forwarding.
+// Scheme should specify if 'ws' or 'wss' should be used.
 func NewSingleHostReverseProxy(target *url.URL) *ReverseProxy {
 	targetQuery := target.RawQuery
 	director := func(req *http.Request) {
@@ -86,10 +92,24 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !strings.Contains(host, ":") {
 		host = host + ":80"
 	}
+
 	dial := p.Dial
 	if dial == nil {
 		dial = net.Dial
 	}
+
+	if outreq.URL.Scheme == "wss" {
+		var tlsConfig *tls.Config
+		if p.TLSClientConfig == nil {
+			tlsConfig = &tls.Config{}
+		} else {
+			tlsConfig = p.TLSClientConfig
+		}
+		dial = func(network, address string) (net.Conn, error) {
+			return tls.Dial("tcp", host, tlsConfig)
+		}
+	}
+
 	d, err := dial("tcp", host)
 	if err != nil {
 		http.Error(w, "Error forwarding request.", 500)

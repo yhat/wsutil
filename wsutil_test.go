@@ -1,9 +1,14 @@
 package wsutil
 
 import (
+	"bytes"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,6 +17,8 @@ import (
 
 	"golang.org/x/net/websocket"
 )
+
+var devnull = log.New(ioutil.Discard, "", 0)
 
 func EchoWSHandler(ws *websocket.Conn) {
 	io.Copy(ws, ws)
@@ -181,5 +188,99 @@ func TestReverseProxy(t *testing.T) {
 	case <-time.After(4 * time.Second):
 		t.Error("websocket request timed out")
 		return
+	}
+}
+
+// HTTP requests should always create errors
+func TestHTTPReq(t *testing.T) {
+	backendHF := func(w http.ResponseWriter, r *http.Request) {
+		t.Error("non-websocket request was made through proxy")
+	}
+	backend := httptest.NewServer(http.HandlerFunc(backendHF))
+	defer backend.Close()
+
+	u, err := url.Parse(backend.URL + "/")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	u.Scheme = "ws"
+
+	proxy := NewSingleHostReverseProxy(u)
+	proxy.ErrorLog = devnull
+	proxyServer := httptest.NewServer(proxy)
+	defer proxyServer.Close()
+
+	_, err = http.Get(proxyServer.URL + "/")
+	if err != nil {
+		// the websocket proxy should return with a 500 to an http request, not an error
+		t.Error(err)
+		return
+	}
+}
+
+func TestTLS(t *testing.T) {
+	cert, err := tls.LoadX509KeyPair("testdata/server_cert.crt", "testdata/server_key.crt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootCert, err := ioutil.ReadFile("testdata/root_cert.crt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(rootCert) {
+		t.Fatal("no root certificate detected")
+	}
+
+	randData := make([]byte, 2048)
+	if _, err = io.ReadFull(rand.Reader, randData); err != nil {
+		t.Fatal(err)
+	}
+
+	backendHandler := func(ws *websocket.Conn) {
+		_, err := ws.Write(randData)
+		if err != nil {
+			t.Errorf("error writing to websocket: %v", err)
+		}
+		ws.Close()
+	}
+	backend := httptest.NewUnstartedServer(websocket.Handler(backendHandler))
+	backend.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
+	backend.StartTLS()
+	defer backend.Close()
+
+	u, err := url.Parse(backend.URL + "/")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	u.Scheme = "wss"
+
+	proxy := NewSingleHostReverseProxy(u)
+	proxy.TLSClientConfig = &tls.Config{RootCAs: certPool}
+	proxyServer := httptest.NewServer(proxy)
+	defer proxyServer.Close()
+
+	proxyURL, err := url.Parse(proxyServer.URL + "/")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	proxyURL.Scheme = "ws"
+
+	ws, err := websocket.Dial(proxyURL.String(), "", "http://localhost/")
+	if err != nil {
+		t.Errorf("could not dial proxy %s: %v", proxyURL.String(), err)
+		return
+	}
+	readData := make([]byte, len(randData))
+	defer ws.Close()
+	if _, err := io.ReadFull(ws, readData); err != nil {
+		t.Errorf("error reading from ws: %v", err)
+		return
+	}
+	if bytes.Compare(randData, readData) != 0 {
+		t.Error("data send and data read was different")
 	}
 }
