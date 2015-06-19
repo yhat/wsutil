@@ -88,14 +88,19 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	*outreq = *r
 	p.Director(outreq)
 	host := outreq.URL.Host
-	// if host does not specify a port, default to port 80
-	if !strings.Contains(host, ":") {
-		host = host + ":80"
-	}
 
 	dial := p.Dial
 	if dial == nil {
 		dial = net.Dial
+	}
+
+	// if host does not specify a port, use the default http port
+	if !strings.Contains(host, ":") {
+		if outreq.URL.Scheme == "wss" {
+			host = host + ":443"
+		} else {
+			host = host + ":80"
+		}
 	}
 
 	if outreq.URL.Scheme == "wss" {
