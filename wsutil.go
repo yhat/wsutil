@@ -160,7 +160,10 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	go cp(d, nc)
 	go cp(nc, d)
-	<-errc
+	select {
+	case <-errc:
+	case <-r.Context().Done():
+	}
 }
 
 // IsWebSocketRequest returns a boolean indicating whether the request has the
